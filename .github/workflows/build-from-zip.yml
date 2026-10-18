@@ -2,6 +2,13 @@ name: Build BootText QMOD from ZIP
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - ".github/workflows/build-from-zip.yml"
+      - "boottext-build-kit-readme-license.zip"
+      - "boottext-quest-source/**"
+      - "README.md"
 
 permissions:
   contents: read
@@ -114,8 +121,10 @@ jobs:
           ref: main
           path: _quest-mod-template
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      # QPM.CLI v1.5.11 uses the unstable `try_find` feature.
+      # Build it with nightly Rust, not stable, or cargo install fails with E0554.
+      - name: Set up Rust nightly for QPM CLI
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Install QPM CLI
         run: cargo install --git https://github.com/QuestPackageManager/QPM.CLI --tag v1.5.11 --locked --bin qpm qpm_cli
