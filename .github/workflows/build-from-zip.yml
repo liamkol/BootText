@@ -151,6 +151,27 @@ jobs:
             --output-dir _build \
             --ndk-path "$ANDROID_NDK_HOME"
 
+      - name: Align Beat Saber hook dependency with BSML
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("_build/qpm.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          deps = data.get("dependencies", [])
+          hook = next((d for d in deps if d.get("id") == "beatsaber-hook"), None)
+          bsml = next((d for d in deps if d.get("id") == "bsml"), None)
+          if hook is None or bsml is None:
+              raise SystemExit("Required beatsaber-hook or bsml dependency is missing from qpm.json")
+          old = hook.get("versionRange")
+          hook["versionRange"] = "^6.4.1"
+          path.write_text(json.dumps(data, indent=2) + "\\n", encoding="utf-8")
+          print(f"Updated beatsaber-hook dependency from {old} to {hook['versionRange']}; BSML {bsml.get('versionRange')} requires hook 6.4.1+.")
+          PY
+
       - name: Restore dependencies and compile Quest ARM64 library
         shell: bash
         run: |
