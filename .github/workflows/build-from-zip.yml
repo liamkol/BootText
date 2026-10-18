@@ -151,7 +151,7 @@ jobs:
             --output-dir _build \
             --ndk-path "$ANDROID_NDK_HOME"
 
-      - name: Align Beat Saber hook dependency with BSML
+      - name: Align Quest dependencies with current BSML and Scotland2 headers
         shell: bash
         run: |
           set -euo pipefail
@@ -159,17 +159,42 @@ jobs:
           import json
           from pathlib import Path
 
-          path = Path("_build/qpm.json")
-          data = json.loads(path.read_text(encoding="utf-8"))
+          qpm_path = Path("_build/qpm.json")
+          data = json.loads(qpm_path.read_text(encoding="utf-8"))
           deps = data.get("dependencies", [])
           hook = next((d for d in deps if d.get("id") == "beatsaber-hook"), None)
           bsml = next((d for d in deps if d.get("id") == "bsml"), None)
           if hook is None or bsml is None:
               raise SystemExit("Required beatsaber-hook or bsml dependency is missing from qpm.json")
-          old = hook.get("versionRange")
+
+          old_hook = hook.get("versionRange")
           hook["versionRange"] = "^6.4.1"
-          path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-          print(f"Updated beatsaber-hook dependency from {old} to {hook['versionRange']}; BSML {bsml.get('versionRange')} requires hook 6.4.1+.")
+
+          # Legacy paper 3 headers conflict with the paper2_scotland2 headers
+          # already used by the current Quest/Scotland2 dependency set.
+          deps = [d for d in deps if d.get("id") != "paper"]
+          paper2 = next((d for d in deps if d.get("id") == "paper2_scotland2"), None)
+          if paper2 is None:
+              paper2 = {"id": "paper2_scotland2", "versionRange": "^4.6.4", "additionalData": {}}
+              deps.append(paper2)
+          else:
+              paper2["versionRange"] = "^4.6.4"
+          data["dependencies"] = deps
+          qpm_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+          header_path = Path("_build/include/main.hpp")
+          header = header_path.read_text(encoding="utf-8")
+          legacy_include = '#include "paper/shared/logger.hpp"'
+          modern_include = '#include "beatsaber-hook/shared/utils/logging.hpp"'
+          if legacy_include in header:
+              header = header.replace(legacy_include, modern_include)
+              header_path.write_text(header, encoding="utf-8")
+              print("Switched main.hpp from the legacy Paper header to the current Beat Saber hook logging header.")
+          elif modern_include not in header:
+              raise SystemExit("Could not locate the expected logger include in include/main.hpp")
+
+          print(f"Updated beatsaber-hook {old_hook} -> {hook['versionRange']}; BSML is {bsml.get('versionRange')}.")
+          print("Replaced legacy paper dependency with paper2_scotland2 ^4.6.4 to avoid duplicate logger definitions.")
           PY
 
       - name: Restore dependencies and compile Quest ARM64 library
