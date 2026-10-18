@@ -188,11 +188,30 @@ jobs:
           modern_include = '#include "beatsaber-hook/shared/utils/logging.hpp"'
           if legacy_include in header:
               header = header.replace(legacy_include, modern_include)
-              header_path.write_text(header, encoding="utf-8")
-              print("Switched main.hpp from the legacy Paper header to the current Beat Saber hook logging header.")
           elif modern_include not in header:
               raise SystemExit("Could not locate the expected logger include in include/main.hpp")
 
+          # The source archive's main.hpp replaces the template header, so restore
+          # its config include. The template defines MOD_EXTERN_FUNC in _config.hpp.
+          modloader_include = '#include "scotland2/shared/modloader.h"'
+          config_include = '#include "_config.hpp"'
+          if config_include not in header:
+              if modloader_include not in header:
+                  raise SystemExit("Could not locate the Scotland2 include in include/main.hpp")
+              header = header.replace(modloader_include, modloader_include + "\\n" + config_include)
+          header_path.write_text(header, encoding="utf-8")
+
+          source_path = Path("_build/src/main.cpp")
+          source = source_path.read_text(encoding="utf-8")
+          old_string_helper = "il2cpp_utils::createcsstr"
+          if old_string_helper in source:
+              source = source.replace(old_string_helper, "il2cpp_utils::newcsstr")
+              source_path.write_text(source, encoding="utf-8")
+              print("Updated obsolete il2cpp_utils::createcsstr calls to newcsstr.")
+          elif "il2cpp_utils::newcsstr" not in source:
+              raise SystemExit("Could not find a supported IL2CPP string helper in src/main.cpp")
+
+          print("Using the template config header for MOD_EXTERN_FUNC and the current logging include.")
           print(f"Updated beatsaber-hook {old_hook} -> {hook['versionRange']}; BSML is {bsml.get('versionRange')}.")
           print("Replaced legacy paper dependency with paper2_scotland2 ^4.6.4 to avoid duplicate logger definitions.")
           PY
