@@ -13,32 +13,98 @@ jobs:
       - name: Check out this repository
         uses: actions/checkout@v4
 
-      - name: Extract BootText project ZIP
+      - name: Find and prepare BootText source
+        id: source
         shell: bash
         run: |
           set -euo pipefail
-          archive="boottext-build-kit-readme-license.zip"
-          test -f "$archive" || { echo "Missing $archive. Upload the BootText ZIP to the repository root."; exit 1; }
           python3 - <<'PY'
-          from pathlib import Path
+          from pathlib import Path, PurePosixPath
+          import os
           import zipfile
 
-          archive = Path("boottext-build-kit-readme-license.zip")
-          destination = Path("unzipped").resolve()
-          destination.mkdir(parents=True, exist_ok=True)
-          with zipfile.ZipFile(archive) as zf:
-              bad = zf.testzip()
-              if bad:
-                  raise SystemExit(f"ZIP integrity error: {bad}")
-              for item in zf.infolist():
-                  target = (destination / item.filename).resolve()
-                  if target != destination and destination not in target.parents:
-                      raise SystemExit(f"Unsafe ZIP path: {item.filename}")
-              zf.extractall(destination)
-          source = destination / "boottext-quest-source"
-          if not (source / "src" / "main.cpp").is_file():
-              raise SystemExit("Could not find boottext-quest-source/src/main.cpp inside the ZIP")
-          print(f"Found BootText source at {source}")
+          repo = Path.cwd().resolve()
+          destination = repo / "unzipped"
+          destination.mkdir(exist_ok=True)
+
+          def is_source_root(path: Path) -> bool:
+              return (
+                  (path / "src" / "main.cpp").is_file()
+                  and (path / "scripts" / "prepare_ci_project.py").is_file()
+                  and (path / "scripts" / "pack_qmod.py").is_file()
+              )
+
+          # First accept a project whose files were uploaded directly to GitHub.
+          direct_candidates = [repo]
+          for folder in repo.rglob("src"):
+              if folder.is_dir() and folder.parent != destination and ".git" not in folder.parts:
+                  direct_candidates.append(folder.parent)
+          direct_candidates = list(dict.fromkeys(p.resolve() for p in direct_candidates))
+          direct = [p for p in direct_candidates if is_source_root(p)]
+
+          if direct:
+              source_root = direct[0]
+              print(f"Using source files already in repository: {source_root}")
+          else:
+              archives = []
+              for candidate in repo.rglob("*.zip"):
+                  if ".git" in candidate.parts or "unzipped" in candidate.parts:
+                      continue
+                  try:
+                      with zipfile.ZipFile(candidate) as zf:
+                          names = {name.rstrip("/") for name in zf.namelist()}
+                          for name in names:
+                              p = PurePosixPath(name)
+                              if p.parts[-2:] != ("src", "main.cpp"):
+                                  continue
+                              prefix = p.parent.parent
+                              needed = [
+                                  (prefix / "scripts" / "prepare_ci_project.py").as_posix(),
+                                  (prefix / "scripts" / "pack_qmod.py").as_posix(),
+                              ]
+                              if all(item in names for item in needed):
+                                  archives.append((candidate, prefix))
+                                  break
+                  except (OSError, zipfile.BadZipFile):
+                      continue
+
+              if not archives:
+                  raise SystemExit(
+                      "Could not find BootText source. Upload the BootText ZIP anywhere in the repository, "
+                      "or upload the extracted project files. The ZIP must contain src/main.cpp and "
+                      "scripts/prepare_ci_project.py."
+                  )
+
+              # Prefer the originally supplied archive name; otherwise require one unambiguous archive.
+              preferred = [item for item in archives if item[0].name.lower() == "boottext-build-kit-readme-license.zip"]
+              if preferred:
+                  archive, prefix = preferred[0]
+              elif len(archives) == 1:
+                  archive, prefix = archives[0]
+              else:
+                  found = ", ".join(str(item[0].relative_to(repo)) for item in archives)
+                  raise SystemExit(f"Found multiple possible BootText ZIPs: {found}. Keep one ZIP in the repo and retry.")
+
+              print(f"Using archive: {archive.relative_to(repo)}")
+              extract_dir = destination / archive.stem
+              extract_dir.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(archive) as zf:
+                  bad = zf.testzip()
+                  if bad:
+                      raise SystemExit(f"ZIP integrity error in {bad}")
+                  for member in zf.infolist():
+                      item = PurePosixPath(member.filename)
+                      if item.is_absolute() or ".." in item.parts:
+                          raise SystemExit(f"Unsafe ZIP path: {member.filename}")
+                  zf.extractall(extract_dir)
+
+              source_root = (extract_dir / Path(prefix.as_posix())).resolve()
+              if not is_source_root(source_root):
+                  raise SystemExit(f"Extracted ZIP, but the BootText source layout was not found at {source_root}")
+              print(f"Extracted BootText source: {source_root}")
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"BOOTTEXT_SOURCE={source_root}\n")
           PY
 
       - name: Check out the Quest mod template
@@ -68,8 +134,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
 
       - name: Prepare the BootText template project
+        shell: bash
         run: |
-          python3 unzipped/boottext-quest-source/scripts/prepare_ci_project.py \
+          set -euo pipefail
+          python3 "$BOOTTEXT_SOURCE/scripts/prepare_ci_project.py" \
             --template-dir _quest-mod-template/template \
             --output-dir _build \
             --ndk-path "$ANDROID_NDK_HOME"
