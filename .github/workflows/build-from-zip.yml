@@ -1,0 +1,95 @@
+name: Build BootText QMOD from ZIP
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Extract BootText project ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="boottext-build-kit-readme-license.zip"
+          test -f "$archive" || { echo "Missing $archive. Upload the BootText ZIP to the repository root."; exit 1; }
+          python3 - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          archive = Path("boottext-build-kit-readme-license.zip")
+          destination = Path("unzipped").resolve()
+          destination.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive) as zf:
+              bad = zf.testzip()
+              if bad:
+                  raise SystemExit(f"ZIP integrity error: {bad}")
+              for item in zf.infolist():
+                  target = (destination / item.filename).resolve()
+                  if target != destination and destination not in target.parents:
+                      raise SystemExit(f"Unsafe ZIP path: {item.filename}")
+              zf.extractall(destination)
+          source = destination / "boottext-quest-source"
+          if not (source / "src" / "main.cpp").is_file():
+              raise SystemExit("Could not find boottext-quest-source/src/main.cpp inside the ZIP")
+          print(f"Found BootText source at {source}")
+          PY
+
+      - name: Check out the Quest mod template
+        uses: actions/checkout@v4
+        with:
+          repository: Lauriethefish/quest-mod-template
+          ref: main
+          path: _quest-mod-template
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install QPM CLI
+        run: cargo install --git https://github.com/QuestPackageManager/QPM.CLI --tag v1.5.11 --locked --bin qpm qpm_cli
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "ndk;26.3.11579264"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: Install CMake and Ninja
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Prepare the BootText template project
+        run: |
+          python3 unzipped/boottext-quest-source/scripts/prepare_ci_project.py \
+            --template-dir _quest-mod-template/template \
+            --output-dir _build \
+            --ndk-path "$ANDROID_NDK_HOME"
+
+      - name: Restore dependencies and compile Quest ARM64 library
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd _build
+          qpm restore
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -B build
+          cmake --build build --parallel 2
+          test -f build/libboottext.so
+
+      - name: Package and validate the QMOD
+        run: python3 _build/scripts/pack_qmod.py _build/build/libboottext.so --output BootText.qmod
+
+      - name: Upload QMOD artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BootText-QMOD-Beat-Saber-1.40.8
+          path: BootText.qmod
+          if-no-files-found: error
