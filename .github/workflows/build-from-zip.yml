@@ -168,7 +168,7 @@ jobs:
               raise SystemExit("Required beatsaber-hook or bsml dependency is missing from qpm.json")
           old = hook.get("versionRange")
           hook["versionRange"] = "^6.4.1"
-          path.write_text(json.dumps(data, indent=2) + "\\n", encoding="utf-8")
+          path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
           print(f"Updated beatsaber-hook dependency from {old} to {hook['versionRange']}; BSML {bsml.get('versionRange')} requires hook 6.4.1+.")
           PY
 
