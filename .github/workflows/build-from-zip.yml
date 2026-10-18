@@ -130,7 +130,7 @@ jobs:
         run: cargo install --git https://github.com/QuestPackageManager/QPM.CLI --tag v1.5.11 --locked --bin qpm qpm_cli
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
       - name: Install Android NDK
         shell: bash
