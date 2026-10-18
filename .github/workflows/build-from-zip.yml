@@ -198,7 +198,7 @@ jobs:
           if config_include not in header:
               if modloader_include not in header:
                   raise SystemExit("Could not locate the Scotland2 include in include/main.hpp")
-              header = header.replace(modloader_include, modloader_include + "\\n" + config_include)
+              header = header.replace(modloader_include, modloader_include + "\n" + config_include)
           header_path.write_text(header, encoding="utf-8")
 
           source_path = Path("_build/src/main.cpp")
